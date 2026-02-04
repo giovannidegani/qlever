@@ -31,7 +31,25 @@ bool GraphQLProtocol::isGraphQLRequest(const RequestType& request) {
 
   // Accept /graphql or /graphql/ (with or without query parameters)
   // The path() method excludes query params, so this handles both cases
+  // But exclude /graphql/config which is handled separately
+  if (path == "/graphql/config" || path == "/graphql/config/") {
+    return false;
+  }
   return path == "/graphql" || path == "/graphql/";
+}
+
+// ____________________________________________________________________________
+bool GraphQLProtocol::isGraphQLConfigRequest(const RequestType& request) {
+  std::string target{request.target()};
+
+  auto urlResult = boost::urls::parse_origin_form(target);
+  if (urlResult.has_error()) {
+    return ql::starts_with(target, "/graphql/config");
+  }
+  boost::url url = urlResult.value();
+  std::string path = url.path();
+
+  return path == "/graphql/config" || path == "/graphql/config/";
 }
 
 // ____________________________________________________________________________

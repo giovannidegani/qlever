@@ -101,6 +101,8 @@ class Server {
   ad_utility::websocket::QueryRegistry queryRegistry_{};
 
 #ifdef QLEVER_GRAPHQL_SUPPORT
+  // GraphQL schema builder configuration - can be modified at runtime
+  graphql::SchemaBuilderConfig graphqlConfig_;
   // Cached GraphQL schema builder - initialized lazily on first request
   mutable std::optional<graphql::SchemaBuilder> graphqlSchemaBuilder_;
 #endif
@@ -366,6 +368,28 @@ class Server {
       Awaitable<void> processGraphQLRequest(
           const RequestT& request, ResponseT&& send,
           const ad_utility::Timer& requestTimer);
+
+  // Process GraphQL configuration requests to /graphql/config endpoint.
+  // GET returns current configuration as JSON.
+  // POST updates configuration from JSON body.
+  CPP_template(typename RequestT, typename ResponseT)(
+      requires ad_utility::httpUtils::HttpRequest<RequestT>)
+      Awaitable<void> processGraphQLConfigRequest(
+          const RequestT& request, ResponseT&& send);
+
+  // Get the current GraphQL schema builder configuration
+  const graphql::SchemaBuilderConfig& getGraphQLConfig() const {
+    return graphqlConfig_;
+  }
+
+  // Set the GraphQL schema builder configuration
+  // This clears the cached schema so it will be rebuilt with new config
+  void setGraphQLConfig(const graphql::SchemaBuilderConfig& config) {
+    graphqlConfig_ = config;
+    if (graphqlSchemaBuilder_.has_value()) {
+      graphqlSchemaBuilder_.reset();
+    }
+  }
 #endif
 };
 

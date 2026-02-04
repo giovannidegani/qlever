@@ -373,6 +373,13 @@ CPP_template_def(typename RequestT, typename ResponseT)(
   ad_utility::Timer requestTimer{ad_utility::Timer::Started};
 
 #ifdef QLEVER_GRAPHQL_SUPPORT
+  // Check if this is a GraphQL config request (to /graphql/config endpoint)
+  if (graphql::GraphQLProtocol::isGraphQLConfigRequest(request)) {
+    AD_LOG_INFO << "Processing GraphQL config request" << std::endl;
+    co_return co_await processGraphQLConfigRequest(request,
+                                                   std::forward<ResponseT>(send));
+  }
+
   // Check if this is a GraphQL request (to /graphql endpoint)
   if (graphql::GraphQLProtocol::isGraphQLRequest(request)) {
     AD_LOG_INFO << "Processing GraphQL request" << std::endl;
@@ -1550,8 +1557,9 @@ CPP_template_def(typename RequestT, typename ResponseT)(
 
   // Build or retrieve GraphQL schema from RDF metadata
   // The schema builder is cached in the Server instance for performance
+  // Uses the runtime-configurable graphqlConfig_
   if (!graphqlSchemaBuilder_.has_value()) {
-    graphqlSchemaBuilder_.emplace(index_);
+    graphqlSchemaBuilder_.emplace(index_, graphqlConfig_);
   }
   const auto& schema = graphqlSchemaBuilder_->getSchema();
 
@@ -1825,9 +1833,143 @@ CPP_template_def(typename RequestT, typename ResponseT)(
   }
 }
 
+// ____________________________________________________________________________
+// Helper to convert SchemaBuilderConfig to JSON
+static nlohmann::json configToJson(const graphql::SchemaBuilderConfig& config) {
+  nlohmann::json j;
+  j["minInstanceCount"] = config.minInstanceCount;
+  j["maxTypes"] = config.maxTypes;
+  j["minPropertyUses"] = config.minPropertyUses;
+  j["maxPropertiesPerType"] = config.maxPropertiesPerType;
+  j["useLabelsAsFieldNames"] = config.useLabelsAsFieldNames;
+  j["preferredLanguage"] = config.preferredLanguage;
+  j["discoverRelationships"] = config.discoverRelationships;
+  j["useOwlInference"] = config.useOwlInference;
+  j["autoGenerateOwlViews"] = config.autoGenerateOwlViews;
+  j["generateInterfaces"] = config.generateInterfaces;
+  j["inheritProperties"] = config.inheritProperties;
+
+  // Convert prefixes map
+  nlohmann::json prefixes = nlohmann::json::object();
+  for (const auto& [iri, prefix] : config.prefixes) {
+    prefixes[iri] = prefix;
+  }
+  j["prefixes"] = prefixes;
+
+  return j;
+}
+
+// Helper to update SchemaBuilderConfig from JSON
+static void configFromJson(const nlohmann::json& j,
+                           graphql::SchemaBuilderConfig& config) {
+  if (j.contains("minInstanceCount")) {
+    config.minInstanceCount = j["minInstanceCount"].get<size_t>();
+  }
+  if (j.contains("maxTypes")) {
+    config.maxTypes = j["maxTypes"].get<size_t>();
+  }
+  if (j.contains("minPropertyUses")) {
+    config.minPropertyUses = j["minPropertyUses"].get<size_t>();
+  }
+  if (j.contains("maxPropertiesPerType")) {
+    config.maxPropertiesPerType = j["maxPropertiesPerType"].get<size_t>();
+  }
+  if (j.contains("useLabelsAsFieldNames")) {
+    config.useLabelsAsFieldNames = j["useLabelsAsFieldNames"].get<bool>();
+  }
+  if (j.contains("preferredLanguage")) {
+    config.preferredLanguage = j["preferredLanguage"].get<std::string>();
+  }
+  if (j.contains("discoverRelationships")) {
+    config.discoverRelationships = j["discoverRelationships"].get<bool>();
+  }
+  if (j.contains("useOwlInference")) {
+    config.useOwlInference = j["useOwlInference"].get<bool>();
+  }
+  if (j.contains("autoGenerateOwlViews")) {
+    config.autoGenerateOwlViews = j["autoGenerateOwlViews"].get<bool>();
+  }
+  if (j.contains("generateInterfaces")) {
+    config.generateInterfaces = j["generateInterfaces"].get<bool>();
+  }
+  if (j.contains("inheritProperties")) {
+    config.inheritProperties = j["inheritProperties"].get<bool>();
+  }
+  if (j.contains("prefixes") && j["prefixes"].is_object()) {
+    config.prefixes.clear();
+    for (const auto& [iri, prefix] : j["prefixes"].items()) {
+      config.prefixes[iri] = prefix.get<std::string>();
+    }
+  }
+}
+
+// ____________________________________________________________________________
+template <typename RequestT, typename ResponseT>
+requires ad_utility::httpUtils::HttpRequest<RequestT>
+Awaitable<void> Server::processGraphQLConfigRequest(const RequestT& request,
+                                                    ResponseT&& send) {
+  using ad_utility::httpUtils::createJsonResponse;
+  namespace http = boost::beast::http;
+
+  // GET request: return current configuration
+  if (request.method() == http::verb::get) {
+    nlohmann::json response;
+    response["config"] = configToJson(graphqlConfig_);
+    response["cached"] = graphqlSchemaBuilder_.has_value();
+
+    co_return co_await send(createJsonResponse(
+        response, request, http::status::ok));
+  }
+
+  // POST request: update configuration
+  if (request.method() == http::verb::post) {
+    nlohmann::json responseJson;
+    http::status responseStatus = http::status::ok;
+
+    try {
+      nlohmann::json body = nlohmann::json::parse(request.body());
+
+      // Update the configuration
+      graphql::SchemaBuilderConfig newConfig = graphqlConfig_;
+      configFromJson(body, newConfig);
+
+      // Apply the new configuration (this clears the cache)
+      setGraphQLConfig(newConfig);
+
+      // Return the updated configuration
+      responseJson["config"] = configToJson(graphqlConfig_);
+      responseJson["message"] = "Configuration updated successfully";
+      responseJson["cached"] = false;  // Cache was cleared
+    } catch (const nlohmann::json::parse_error& e) {
+      responseJson["error"] = "Invalid JSON";
+      responseJson["message"] = e.what();
+      responseStatus = http::status::bad_request;
+    } catch (const std::exception& e) {
+      responseJson["error"] = "Configuration error";
+      responseJson["message"] = e.what();
+      responseStatus = http::status::bad_request;
+    }
+
+    co_return co_await send(createJsonResponse(
+        responseJson, request, responseStatus));
+  }
+
+  // Other methods not allowed
+  nlohmann::json error;
+  error["error"] = "Method not allowed";
+  error["message"] = "Use GET to read config, POST to update config";
+  co_return co_await send(createJsonResponse(
+      error, request, http::status::method_not_allowed));
+}
+
 // Explicit template instantiation for GraphQL request processing
 template Awaitable<void> Server::processGraphQLRequest(
     const SimpleRequest&,
     std::function<Awaitable<void>(NonStreamedResponse)>&&,
     const ad_utility::Timer&);
+
+// Explicit template instantiation for GraphQL config request processing
+template Awaitable<void> Server::processGraphQLConfigRequest(
+    const SimpleRequest&,
+    std::function<Awaitable<void>(NonStreamedResponse)>&&);
 #endif  // QLEVER_GRAPHQL_SUPPORT

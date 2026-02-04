@@ -303,4 +303,34 @@ TEST(GraphQLProtocolTest, ParsePOST_NoContentType_DefaultsToJSON) {
   EXPECT_EQ(op.query, "{ Person { id } }");
 }
 
+// ============================================================================
+// Config Endpoint Detection Tests
+// ============================================================================
+
+TEST(GraphQLProtocolTest, IsGraphQLConfigRequest_ConfigPath) {
+  auto req = makeRequest(http::verb::get, "/graphql/config", "", "");
+  EXPECT_TRUE(GraphQLProtocol::isGraphQLConfigRequest(req));
+}
+
+TEST(GraphQLProtocolTest, IsGraphQLConfigRequest_ConfigPathWithSlash) {
+  auto req = makeRequest(http::verb::get, "/graphql/config/", "", "");
+  EXPECT_TRUE(GraphQLProtocol::isGraphQLConfigRequest(req));
+}
+
+TEST(GraphQLProtocolTest, IsGraphQLConfigRequest_NotConfigPath) {
+  auto req = makeRequest(http::verb::get, "/graphql", "", "");
+  EXPECT_FALSE(GraphQLProtocol::isGraphQLConfigRequest(req));
+}
+
+TEST(GraphQLProtocolTest, IsGraphQLConfigRequest_OtherPath) {
+  auto req = makeRequest(http::verb::get, "/sparql", "", "");
+  EXPECT_FALSE(GraphQLProtocol::isGraphQLConfigRequest(req));
+}
+
+TEST(GraphQLProtocolTest, IsGraphQLRequest_ExcludesConfigPath) {
+  // /graphql/config should NOT be treated as a regular GraphQL request
+  auto req = makeRequest(http::verb::get, "/graphql/config", "", "");
+  EXPECT_FALSE(GraphQLProtocol::isGraphQLRequest(req));
+}
+
 #endif  // QLEVER_GRAPHQL_SUPPORT

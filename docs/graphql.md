@@ -551,6 +551,45 @@ GraphQL support is enabled by default. To disable it during build:
 cmake .. -DGRAPHQL_SUPPORT=OFF
 ```
 
+### Runtime Configuration
+
+The schema builder configuration can be modified at runtime via the `/graphql/config` endpoint:
+
+**Get current configuration:**
+```bash
+curl http://localhost:7001/graphql/config
+```
+
+**Update configuration:**
+```bash
+curl -X POST http://localhost:7001/graphql/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "minInstanceCount": 50,
+    "maxTypes": 1000,
+    "preferredLanguage": "de",
+    "useOwlInference": true
+  }'
+```
+
+**Available configuration options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `minInstanceCount` | 100 | Minimum instances for a class to become a type |
+| `maxTypes` | 500 | Maximum number of types in schema |
+| `minPropertyUses` | 10 | Minimum uses for a property to be included |
+| `maxPropertiesPerType` | 100 | Maximum properties per type |
+| `useLabelsAsFieldNames` | true | Use rdfs:label for field names |
+| `preferredLanguage` | "en" | Preferred language for labels |
+| `discoverRelationships` | true | Discover object property relationships |
+| `useOwlInference` | true | Use OWL inference if available |
+| `autoGenerateOwlViews` | false | Auto-generate OWL inference views |
+| `generateInterfaces` | true | Generate GraphQL interfaces from superclasses |
+| `inheritProperties` | true | Inherit properties from superclasses |
+
+Changing the configuration clears the cached schema, which will be rebuilt on the next query.
+
 ## Schema Generation
 
 The GraphQL schema is automatically generated from your RDF data by:

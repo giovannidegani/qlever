@@ -50,6 +50,11 @@ class GraphQLProtocol {
   /// @return true if the request is for the /graphql endpoint
   static bool isGraphQLRequest(const RequestType& request);
 
+  /// Check if the request is a GraphQL config request
+  /// @param request The HTTP request to check
+  /// @return true if the request is for the /graphql/config endpoint
+  static bool isGraphQLConfigRequest(const RequestType& request);
+
   /// Parse an HTTP request containing a GraphQL query
   /// @param request The HTTP request
   /// @return The parsed GraphQL operation or an error
