@@ -490,3 +490,13 @@ addLinkAndDiscoverTest(MaterializedViewsTest qlever engine server)
 addLinkAndDiscoverTestNoLibs(ConstexprMapTest)
 
 addLinkAndDiscoverTestNoLibs(ParallelExecutorTest)
+
+# GraphQL support tests (only if enabled)
+if (GRAPHQL_SUPPORT)
+    addLinkAndDiscoverTest(GraphQLParserTest graphqlParser graphqlEngine)
+    addLinkAndDiscoverTest(GraphQLProtocolTest graphqlEngine http)
+    addLinkAndDiscoverTestSerial(GraphQLIntegrationTest graphqlParser graphqlEngine engine)
+    addLinkAndDiscoverTest(OwlViewGeneratorTest graphqlEngine engine)
+    addLinkAndDiscoverTest(GraphQLMutationTest graphqlParser graphqlEngine)
+    addLinkAndDiscoverTest(GraphQLPerformanceTest graphqlParser graphqlEngine)
+endif()

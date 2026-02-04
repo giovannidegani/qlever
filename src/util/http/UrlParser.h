@@ -80,7 +80,20 @@ struct None {
   QL_DEFINE_DEFAULTED_EQUALITY_OPERATOR_LOCAL(None)
 };
 
+#ifdef QLEVER_GRAPHQL_SUPPORT
+// A GraphQL operation (query or mutation)
+struct GraphQL {
+  std::string query_;
+  std::optional<std::string> operationName_;
+  // Variables are stored externally due to complex type
+
+  QL_DEFINE_DEFAULTED_EQUALITY_OPERATOR_LOCAL(GraphQL, query_, operationName_)
+};
+
+using Operation = std::variant<Query, Update, GraphStoreOperation, GraphQL, None>;
+#else
 using Operation = std::variant<Query, Update, GraphStoreOperation, None>;
+#endif
 }  // namespace sparqlOperation
 
 // Representation of parsed HTTP request.

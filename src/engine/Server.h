@@ -30,6 +30,10 @@
 #include "util/http/websocket/QueryHub.h"
 #include "util/json.h"
 
+#ifdef QLEVER_GRAPHQL_SUPPORT
+#include "engine/graphql/SchemaBuilder.h"
+#endif
+
 template <typename Operation>
 CPP_concept QueryOrUpdate =
     ad_utility::SameAsAny<Operation,
@@ -95,6 +99,11 @@ class Server {
   SortPerformanceEstimator sortPerformanceEstimator_;
   Index index_;
   ad_utility::websocket::QueryRegistry queryRegistry_{};
+
+#ifdef QLEVER_GRAPHQL_SUPPORT
+  // Cached GraphQL schema builder - initialized lazily on first request
+  mutable std::optional<graphql::SchemaBuilder> graphqlSchemaBuilder_;
+#endif
 
   bool enablePatternTrick_;
 
@@ -347,6 +356,17 @@ class Server {
       ad_utility::SharedCancellationHandle cancellationHandle,
       TimeLimit timeLimit);
   FRIEND_TEST(MaterializedViewsTest, serverIntegration);
+
+#ifdef QLEVER_GRAPHQL_SUPPORT
+  // Process a GraphQL request to the /graphql endpoint.
+  // Parses the GraphQL query, translates it to SPARQL, executes it,
+  // and formats the result as nested JSON according to GraphQL spec.
+  CPP_template(typename RequestT, typename ResponseT)(
+      requires ad_utility::httpUtils::HttpRequest<RequestT>)
+      Awaitable<void> processGraphQLRequest(
+          const RequestT& request, ResponseT&& send,
+          const ad_utility::Timer& requestTimer);
+#endif
 };
 
 #endif  // QLEVER_SRC_ENGINE_SERVER_H

@@ -1,4 +1,10 @@
 add_subdirectory(sparqlExpressions)
+
+# GraphQL support (optional, enabled by default)
+if (GRAPHQL_SUPPORT)
+    add_subdirectory(graphql)
+endif()
+
 add_library(SortPerformanceEstimator SortPerformanceEstimator.cpp)
 qlever_target_link_libraries(SortPerformanceEstimator parser)
 add_library(engine
@@ -32,3 +38,8 @@ endif()
 
 add_library(server Server.cpp)
 qlever_target_link_libraries(server engine util index parser global http SortPerformanceEstimator)
+
+# Link GraphQL engine to server if enabled
+if (GRAPHQL_SUPPORT)
+    target_link_libraries(server graphqlEngine)
+endif()
