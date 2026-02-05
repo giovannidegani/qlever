@@ -528,8 +528,7 @@ GraphQL follows the same authentication model as SPARQL:
 |-----------|---------------|--------|
 | Queries | No | Read-only, same as SPARQL SELECT |
 | Mutations | **Yes** | Modify data, same as SPARQL UPDATE |
-| Config GET | No | Reading config is safe |
-| Config POST | **Yes** | Modifies server state |
+| Config (GET/POST) | **Yes** | Exposes/modifies server configuration |
 
 **Provide access token via:**
 ```bash
