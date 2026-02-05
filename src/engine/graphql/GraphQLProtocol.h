@@ -61,6 +61,11 @@ class GraphQLProtocol {
   static std::optional<std::string> extractAccessToken(
       const RequestType& request);
 
+  /// Extract timeout parameter from request URL
+  /// @param request The HTTP request
+  /// @return The timeout string if present, std::nullopt otherwise
+  static std::optional<std::string> extractTimeout(const RequestType& request);
+
   /// Parse an HTTP request containing a GraphQL query
   /// @param request The HTTP request
   /// @return The parsed GraphQL operation or an error

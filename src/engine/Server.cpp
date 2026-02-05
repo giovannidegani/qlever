@@ -1491,6 +1491,23 @@ CPP_template_def(typename RequestT, typename ResponseT)(
         const ad_utility::Timer& requestTimer) {
   using namespace ad_utility::httpUtils;
 
+  // Extract and check access token (for timeout limits, same as SPARQL)
+  auto accessToken = graphql::GraphQLProtocol::extractAccessToken(request);
+  bool accessTokenOk = checkAccessToken(accessToken);
+
+  // Verify user-submitted timeout (same logic as SPARQL)
+  auto userTimeout = graphql::GraphQLProtocol::extractTimeout(request);
+  std::optional<std::string_view> userTimeoutView;
+  if (userTimeout) {
+    userTimeoutView = *userTimeout;
+  }
+  auto timeLimit = co_await verifyUserSubmittedQueryTimeout(
+      userTimeoutView, accessTokenOk, request, send);
+  if (!timeLimit.has_value()) {
+    // Error response already sent by verifyUserSubmittedQueryTimeout
+    co_return;
+  }
+
   // Parse the GraphQL request
   auto parseResult = graphql::GraphQLProtocol::parseHttpRequest(request);
 

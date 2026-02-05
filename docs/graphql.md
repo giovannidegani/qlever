@@ -545,6 +545,22 @@ curl -X POST "http://localhost:7001/graphql?access-token=YOUR_TOKEN" \
   -d '{"query": "mutation { ... }"}'
 ```
 
+### Timeout Control
+
+Like SPARQL, GraphQL queries respect the `timeout` parameter:
+
+```bash
+# Default timeout applies (no auth needed)
+curl "http://localhost:7001/graphql" -d '{"query": "{ Person { name } }"}'
+
+# Extended timeout requires access token
+curl "http://localhost:7001/graphql?timeout=300s" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{"query": "{ Person { name } }"}'
+```
+
+Without a valid access token, the timeout is capped at the server's default limit.
+
 ### Rate Limits
 
 The GraphQL endpoint includes several security features:

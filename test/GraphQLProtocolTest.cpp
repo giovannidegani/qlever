@@ -380,4 +380,32 @@ TEST(GraphQLProtocolTest, ExtractAccessToken_InvalidAuthorizationHeader) {
   EXPECT_FALSE(token.has_value());
 }
 
+// ============================================================================
+// Timeout Extraction Tests
+// ============================================================================
+
+TEST(GraphQLProtocolTest, ExtractTimeout_FromURLParameter) {
+  auto req = makeRequest(http::verb::get, "/graphql?timeout=30s", "", "");
+
+  auto timeout = GraphQLProtocol::extractTimeout(req);
+  ASSERT_TRUE(timeout.has_value());
+  EXPECT_EQ(timeout.value(), "30s");
+}
+
+TEST(GraphQLProtocolTest, ExtractTimeout_NoTimeout) {
+  auto req = makeRequest(http::verb::get, "/graphql", "", "");
+
+  auto timeout = GraphQLProtocol::extractTimeout(req);
+  EXPECT_FALSE(timeout.has_value());
+}
+
+TEST(GraphQLProtocolTest, ExtractTimeout_WithOtherParams) {
+  auto req = makeRequest(http::verb::get,
+      "/graphql?access-token=abc&timeout=60s&other=value", "", "");
+
+  auto timeout = GraphQLProtocol::extractTimeout(req);
+  ASSERT_TRUE(timeout.has_value());
+  EXPECT_EQ(timeout.value(), "60s");
+}
+
 #endif  // QLEVER_GRAPHQL_SUPPORT

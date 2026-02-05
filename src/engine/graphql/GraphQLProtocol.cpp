@@ -87,6 +87,22 @@ std::optional<std::string> GraphQLProtocol::extractAccessToken(
 }
 
 // ____________________________________________________________________________
+std::optional<std::string> GraphQLProtocol::extractTimeout(
+    const RequestType& request) {
+  std::string target{request.target()};
+  auto urlResult = boost::urls::parse_origin_form(target);
+  if (!urlResult.has_error()) {
+    boost::url url = urlResult.value();
+    auto params = url.params();
+    auto it = params.find("timeout");
+    if (it != params.end()) {
+      return std::string((*it).value);
+    }
+  }
+  return std::nullopt;
+}
+
+// ____________________________________________________________________________
 std::variant<GraphQLOperation, std::vector<GraphQLError>>
 GraphQLProtocol::parseHttpRequest(const RequestType& request) {
   // According to GraphQL over HTTP spec:
