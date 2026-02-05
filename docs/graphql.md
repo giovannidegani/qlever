@@ -520,6 +520,33 @@ GraphQL responses follow the standard format:
 
 ## Security
 
+### Authentication
+
+GraphQL follows the same authentication model as SPARQL:
+
+| Operation | Auth Required | Reason |
+|-----------|---------------|--------|
+| Queries | No | Read-only, same as SPARQL SELECT |
+| Mutations | **Yes** | Modify data, same as SPARQL UPDATE |
+| Config GET | No | Reading config is safe |
+| Config POST | **Yes** | Modifies server state |
+
+**Provide access token via:**
+```bash
+# Authorization header (preferred)
+curl -X POST http://localhost:7001/graphql \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "mutation { createPerson(input: {...}) { id } }"}'
+
+# URL parameter
+curl -X POST "http://localhost:7001/graphql?access-token=YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "mutation { ... }"}'
+```
+
+### Rate Limits
+
 The GraphQL endpoint includes several security features:
 
 | Feature | Default Limit | Configurable |

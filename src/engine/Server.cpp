@@ -1618,6 +1618,16 @@ CPP_template_def(typename RequestT, typename ResponseT)(
 
   // Handle mutations differently from queries
   if (operation->type == graphql::OperationType::Mutation) {
+    // Mutations require authentication (same as SPARQL UPDATE)
+    auto accessToken = graphql::GraphQLProtocol::extractAccessToken(request);
+    if (!checkAccessToken(accessToken)) {
+      co_return co_await send(ad_utility::httpUtils::createForbiddenResponse(
+          "GraphQL mutations require a valid access token (same as SPARQL UPDATE). "
+          "Provide via 'Authorization: Bearer <token>' header or "
+          "'?access-token=<token>' URL parameter.",
+          request));
+    }
+
     // Mutations require special handling
     // Currently, SPARQL Update support in QLever may be limited
     // For now, we translate and log the mutation but don't execute it
