@@ -333,4 +333,51 @@ TEST(GraphQLProtocolTest, IsGraphQLRequest_ExcludesConfigPath) {
   EXPECT_FALSE(GraphQLProtocol::isGraphQLRequest(req));
 }
 
+// ============================================================================
+// Access Token Extraction Tests
+// ============================================================================
+
+TEST(GraphQLProtocolTest, ExtractAccessToken_FromAuthorizationHeader) {
+  auto req = makeRequest(http::verb::get, "/graphql", "", "");
+  req.set(http::field::authorization, "Bearer my-secret-token");
+
+  auto token = GraphQLProtocol::extractAccessToken(req);
+  ASSERT_TRUE(token.has_value());
+  EXPECT_EQ(token.value(), "my-secret-token");
+}
+
+TEST(GraphQLProtocolTest, ExtractAccessToken_FromURLParameter) {
+  auto req = makeRequest(http::verb::get, "/graphql?access-token=url-token", "", "");
+
+  auto token = GraphQLProtocol::extractAccessToken(req);
+  ASSERT_TRUE(token.has_value());
+  EXPECT_EQ(token.value(), "url-token");
+}
+
+TEST(GraphQLProtocolTest, ExtractAccessToken_HeaderPrecedence) {
+  // When both header and URL param are provided, header takes precedence
+  auto req = makeRequest(http::verb::get, "/graphql?access-token=url-token", "", "");
+  req.set(http::field::authorization, "Bearer header-token");
+
+  auto token = GraphQLProtocol::extractAccessToken(req);
+  ASSERT_TRUE(token.has_value());
+  EXPECT_EQ(token.value(), "header-token");
+}
+
+TEST(GraphQLProtocolTest, ExtractAccessToken_NoToken) {
+  auto req = makeRequest(http::verb::get, "/graphql", "", "");
+
+  auto token = GraphQLProtocol::extractAccessToken(req);
+  EXPECT_FALSE(token.has_value());
+}
+
+TEST(GraphQLProtocolTest, ExtractAccessToken_InvalidAuthorizationHeader) {
+  // Authorization header without "Bearer " prefix is ignored
+  auto req = makeRequest(http::verb::get, "/graphql", "", "");
+  req.set(http::field::authorization, "Basic dXNlcjpwYXNz");
+
+  auto token = GraphQLProtocol::extractAccessToken(req);
+  EXPECT_FALSE(token.has_value());
+}
+
 #endif  // QLEVER_GRAPHQL_SUPPORT

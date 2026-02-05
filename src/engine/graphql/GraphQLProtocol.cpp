@@ -53,6 +53,40 @@ bool GraphQLProtocol::isGraphQLConfigRequest(const RequestType& request) {
 }
 
 // ____________________________________________________________________________
+std::optional<std::string> GraphQLProtocol::extractAccessToken(
+    const RequestType& request) {
+  // Check Authorization header first (Bearer token)
+  std::string_view authorization = request[http::field::authorization];
+  std::optional<std::string> tokenFromHeader;
+  if (!authorization.empty()) {
+    const std::string prefix = "Bearer ";
+    if (ql::starts_with(authorization, prefix)) {
+      authorization.remove_prefix(prefix.length());
+      tokenFromHeader = std::string(authorization);
+    }
+  }
+
+  // Check URL parameter
+  std::optional<std::string> tokenFromParam;
+  std::string target{request.target()};
+  auto urlResult = boost::urls::parse_origin_form(target);
+  if (!urlResult.has_error()) {
+    boost::url url = urlResult.value();
+    auto params = url.params();
+    auto it = params.find("access-token");
+    if (it != params.end()) {
+      tokenFromParam = std::string((*it).value);
+    }
+  }
+
+  // If both are specified, prefer header (consistent with SPARQL behavior)
+  if (tokenFromHeader) {
+    return tokenFromHeader;
+  }
+  return tokenFromParam;
+}
+
+// ____________________________________________________________________________
 std::variant<GraphQLOperation, std::vector<GraphQLError>>
 GraphQLProtocol::parseHttpRequest(const RequestType& request) {
   // According to GraphQL over HTTP spec:

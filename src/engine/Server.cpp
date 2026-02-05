@@ -1909,9 +1909,13 @@ requires ad_utility::httpUtils::HttpRequest<RequestT>
 Awaitable<void> Server::processGraphQLConfigRequest(const RequestT& request,
                                                     ResponseT&& send) {
   using ad_utility::httpUtils::createJsonResponse;
+  using ad_utility::httpUtils::createForbiddenResponse;
   namespace http = boost::beast::http;
 
-  // GET request: return current configuration
+  // Extract and validate access token for POST requests (modifying config)
+  auto accessToken = graphql::GraphQLProtocol::extractAccessToken(request);
+
+  // GET request: return current configuration (no auth required for reading)
   if (request.method() == http::verb::get) {
     nlohmann::json response;
     response["config"] = configToJson(graphqlConfig_);
@@ -1921,8 +1925,16 @@ Awaitable<void> Server::processGraphQLConfigRequest(const RequestT& request,
         response, request, http::status::ok));
   }
 
-  // POST request: update configuration
+  // POST request: update configuration (requires valid access token)
   if (request.method() == http::verb::post) {
+    // Check authentication - modifying config requires access token
+    if (!checkAccessToken(accessToken)) {
+      co_return co_await send(createForbiddenResponse(
+          "Modifying GraphQL configuration requires a valid access token. "
+          "Provide via 'Authorization: Bearer <token>' header or "
+          "'?access-token=<token>' URL parameter.",
+          request));
+    }
     nlohmann::json responseJson;
     http::status responseStatus = http::status::ok;
 

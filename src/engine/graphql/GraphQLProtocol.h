@@ -55,6 +55,12 @@ class GraphQLProtocol {
   /// @return true if the request is for the /graphql/config endpoint
   static bool isGraphQLConfigRequest(const RequestType& request);
 
+  /// Extract access token from request (from Authorization header or URL param)
+  /// @param request The HTTP request
+  /// @return The access token if present, std::nullopt otherwise
+  static std::optional<std::string> extractAccessToken(
+      const RequestType& request);
+
   /// Parse an HTTP request containing a GraphQL query
   /// @param request The HTTP request
   /// @return The parsed GraphQL operation or an error

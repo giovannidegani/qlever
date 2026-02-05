@@ -560,10 +560,11 @@ The schema builder configuration can be modified at runtime via the `/graphql/co
 curl http://localhost:7001/graphql/config
 ```
 
-**Update configuration:**
+**Update configuration (requires access token):**
 ```bash
 curl -X POST http://localhost:7001/graphql/config \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -d '{
     "minInstanceCount": 50,
     "maxTypes": 1000,
@@ -571,6 +572,8 @@ curl -X POST http://localhost:7001/graphql/config \
     "useOwlInference": true
   }'
 ```
+
+> **Note:** Modifying the configuration requires a valid access token (same as used for other protected QLever operations). Reading the configuration does not require authentication.
 
 **Available configuration options:**
 
