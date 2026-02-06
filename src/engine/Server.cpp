@@ -26,6 +26,17 @@
 #include "engine/QueryExecutionContext.h"
 #include "engine/QueryPlanner.h"
 #include "engine/SparqlProtocol.h"
+#ifdef QLEVER_GRAPHQL_SUPPORT
+#include "engine/graphql/GraphQLProtocol.h"
+#include "engine/graphql/GraphQLResultFormatter.h"
+#include "engine/graphql/MutationSchemaBuilder.h"
+#include "engine/graphql/SchemaBuilder.h"
+#include "parser/graphql/GraphQLMutationTranslator.h"
+#include "parser/graphql/GraphQLParser.h"
+#include "parser/graphql/GraphQLToSparql.h"
+#include "parser/graphql/GraphQLSchema.h"
+#include "parser/graphql/MutationValidator.h"
+#endif
 #include "global/RuntimeParameters.h"
 #include "index/IndexImpl.h"
 #include "parser/SparqlParser.h"
@@ -80,8 +91,7 @@ Server::Server(unsigned short port, size_t numThreads,
 // __________________________________________________________________________
 void Server::initialize(const std::string& indexBaseName, bool useText,
                         bool usePatterns, bool loadAllPermutations,
-                        bool persistUpdates,
-                        std::vector<std::string> preloadMaterializedViews) {
+                        bool persistUpdates) {
   AD_LOG_INFO << "Initializing server ..." << std::endl;
 
   index_.usePatterns() = usePatterns;
@@ -94,18 +104,6 @@ void Server::initialize(const std::string& indexBaseName, bool useText,
   }
 
   materializedViewsManager_.setOnDiskBase(indexBaseName);
-
-  // Preload materialized views as requested by the user. This is done in a
-  // try-catch block to prevent an exception during loading of a view from
-  // blocking the server start.
-  for (const auto& viewName : preloadMaterializedViews) {
-    try {
-      materializedViewsManager_.loadView(viewName);
-    } catch (const std::exception& ex) {
-      AD_LOG_ERROR << "Preloading materialized view '" << viewName
-                   << "' failed: " << ex.what() << "." << std::endl;
-    }
-  }
 
   sortPerformanceEstimator_.computeEstimatesExpensively(
       allocator_, index_.numTriples().normalAndInternal_() *
@@ -123,8 +121,7 @@ void Server::initialize(const std::string& indexBaseName, bool useText,
 // _____________________________________________________________________________
 void Server::run(const std::string& indexBaseName, bool useText,
                  bool usePatterns, bool loadAllPermutations,
-                 bool persistUpdates,
-                 std::vector<std::string> preloadMaterializedViews) {
+                 bool persistUpdates) {
   using namespace ad_utility::httpUtils;
 
   // Function that handles a request asynchronously, will be passed as argument
@@ -206,7 +203,7 @@ void Server::run(const std::string& indexBaseName, bool useText,
 
   // Initialize the index
   initialize(indexBaseName, useText, usePatterns, loadAllPermutations,
-             persistUpdates, std::move(preloadMaterializedViews));
+             persistUpdates);
 
   AD_LOG_INFO << "The server is ready, listening for requests on port "
               << std::to_string(httpServer.getPort()) << " ..." << std::endl;
@@ -375,6 +372,22 @@ CPP_template_def(typename RequestT, typename ResponseT)(
   // Start timing.
   ad_utility::Timer requestTimer{ad_utility::Timer::Started};
 
+#ifdef QLEVER_GRAPHQL_SUPPORT
+  // Check if this is a GraphQL config request (to /graphql/config endpoint)
+  if (graphql::GraphQLProtocol::isGraphQLConfigRequest(request)) {
+    AD_LOG_INFO << "Processing GraphQL config request" << std::endl;
+    co_return co_await processGraphQLConfigRequest(request,
+                                                   std::forward<ResponseT>(send));
+  }
+
+  // Check if this is a GraphQL request (to /graphql endpoint)
+  if (graphql::GraphQLProtocol::isGraphQLRequest(request)) {
+    AD_LOG_INFO << "Processing GraphQL request" << std::endl;
+    co_return co_await processGraphQLRequest(request, std::forward<ResponseT>(send),
+                                              requestTimer);
+  }
+#endif
+
   // Parse the path and the URL parameters from the given request. Works for GET
   // requests as well as the two kinds of POST requests allowed by the SPARQL
   // standard, see method `getUrlPathAndParameters`.
@@ -494,8 +507,13 @@ CPP_template_def(typename RequestT, typename ResponseT)(
           if constexpr (std::is_same_v<T, Query>) {
             return op;
           } else {
+#ifdef QLEVER_GRAPHQL_SUPPORT
+            static_assert(ad_utility::SameAsAny<T, Update, GraphStoreOperation,
+                                                GraphQL, None>);
+#else
             static_assert(
                 ad_utility::SameAsAny<T, Update, GraphStoreOperation, None>);
+#endif
             throw std::runtime_error(
                 "Action 'write-materialized-view' requires a 'SELECT' query.");
           }
@@ -704,11 +722,29 @@ CPP_template_def(typename RequestT, typename ResponseT)(
     return send(createNotFoundResponse("Unknown path", std::move(request)));
   };
 
+#ifdef QLEVER_GRAPHQL_SUPPORT
+  // GraphQL operations are handled earlier in process() via isGraphQLRequest()
+  // This handler is here for completeness of the variant visitor
+  auto visitGraphQL = [&send, &request](
+                          [[maybe_unused]] GraphQL graphql) -> Awaitable<void> {
+    // This should not be reached as GraphQL is handled earlier
+    return send(createBadRequestResponse(
+        "GraphQL operations should use the /graphql endpoint",
+        std::move(request)));
+  };
+
+  co_return co_await processOperation(
+      std::move(parsedHttpRequest.operation_),
+      ad_utility::OverloadCallOperator{visitQuery, visitUpdate, visitGraphStore,
+                                       visitGraphQL, visitNone},
+      requestTimer, request, send, plannedQuery);
+#else
   co_return co_await processOperation(
       std::move(parsedHttpRequest.operation_),
       ad_utility::OverloadCallOperator{visitQuery, visitUpdate, visitGraphStore,
                                        visitNone},
       requestTimer, request, send, plannedQuery);
+#endif
 }
 
 // ____________________________________________________________________________
@@ -1415,8 +1451,9 @@ void Server::writeMaterializedView(
       std::make_shared<QueryExecutionTree>(std::move(plan.queryExecutionTree_));
   auto memoryLimit =
       getRuntimeParameter<&RuntimeParameters::materializedViewWriterMemory_>();
-  materializedViewsManager_.writeViewToDisk(
-      name, {qet, qec, std::move(plan.parsedQuery_)}, memoryLimit);
+  MaterializedViewWriter::writeViewToDisk(
+      qec->getIndex().getOnDiskBase(), name,
+      {qet, qec, std::move(plan.parsedQuery_)}, memoryLimit);
 }
 
 // For helper function `Server::onlyForTestingProcess`
@@ -1443,3 +1480,534 @@ CPP_template_def(typename RequestT, typename ResponseT)(
 // Explicit template instantiation for unit test helper function
 template Awaitable<std::optional<NonStreamedResponse>>
 Server::onlyForTestingProcess(SimpleRequest&);
+
+#ifdef QLEVER_GRAPHQL_SUPPORT
+// _____________________________________________________________________________
+// Process a GraphQL request
+CPP_template_def(typename RequestT, typename ResponseT)(
+    requires ad_utility::httpUtils::HttpRequest<RequestT>)
+    Awaitable<void> Server::processGraphQLRequest(
+        const RequestT& request, ResponseT&& send,
+        const ad_utility::Timer& requestTimer) {
+  using namespace ad_utility::httpUtils;
+
+  // Extract and check access token (for timeout limits, same as SPARQL)
+  auto accessToken = graphql::GraphQLProtocol::extractAccessToken(request);
+  bool accessTokenOk = checkAccessToken(accessToken);
+
+  // Verify user-submitted timeout (same logic as SPARQL)
+  auto userTimeout = graphql::GraphQLProtocol::extractTimeout(request);
+  std::optional<std::string_view> userTimeoutView;
+  if (userTimeout) {
+    userTimeoutView = *userTimeout;
+  }
+  auto timeLimit = co_await verifyUserSubmittedQueryTimeout(
+      userTimeoutView, accessTokenOk, request, send);
+  if (!timeLimit.has_value()) {
+    // Error response already sent by verifyUserSubmittedQueryTimeout
+    co_return;
+  }
+
+  // Parse the GraphQL request
+  auto parseResult = graphql::GraphQLProtocol::parseHttpRequest(request);
+
+  // Handle parse errors
+  if (std::holds_alternative<std::vector<graphql::GraphQLError>>(parseResult)) {
+    const auto& errors =
+        std::get<std::vector<graphql::GraphQLError>>(parseResult);
+    nlohmann::json errorResponse;
+    errorResponse["errors"] = nlohmann::json::array();
+    for (const auto& error : errors) {
+      errorResponse["errors"].push_back(error.toJSON());
+    }
+    co_return co_await send(
+        createJsonResponse(errorResponse, request,
+                           boost::beast::http::status::bad_request));
+  }
+
+  const auto& graphqlOp =
+      std::get<graphql::GraphQLOperation>(parseResult);
+
+  AD_LOG_INFO << "GraphQL query: "
+              << ad_utility::truncateOperationString(graphqlOp.query)
+              << std::endl;
+
+  // Parse the GraphQL query
+  auto gqlParseResult = graphql::GraphQLParser::parse(graphqlOp.query);
+
+  if (std::holds_alternative<std::vector<graphql::GraphQLError>>(
+          gqlParseResult)) {
+    const auto& errors =
+        std::get<std::vector<graphql::GraphQLError>>(gqlParseResult);
+    nlohmann::json errorResponse;
+    errorResponse["errors"] = nlohmann::json::array();
+    for (const auto& error : errors) {
+      errorResponse["errors"].push_back(error.toJSON());
+    }
+    co_return co_await send(
+        createJsonResponse(errorResponse, request,
+                           boost::beast::http::status::bad_request));
+  }
+
+  const auto& document =
+      std::get<graphql::Document>(gqlParseResult);
+
+  // Find the operation to execute
+  std::optional<std::string_view> opName;
+  if (graphqlOp.operationName) {
+    opName = *graphqlOp.operationName;
+  }
+  const auto* operation = document.findOperation(opName);
+  if (!operation) {
+    nlohmann::json errorResponse;
+    errorResponse["errors"] = nlohmann::json::array();
+    nlohmann::json error;
+    error["message"] = graphqlOp.operationName
+                           ? "Operation '" + *graphqlOp.operationName +
+                                 "' not found in document"
+                           : "No operation found in document";
+    errorResponse["errors"].push_back(error);
+    co_return co_await send(
+        createJsonResponse(errorResponse, request,
+                           boost::beast::http::status::bad_request));
+  }
+
+  // Build or retrieve GraphQL schema from RDF metadata
+  // The schema builder is cached in the Server instance for performance
+  // Uses the runtime-configurable graphqlConfig_
+  if (!graphqlSchemaBuilder_.has_value()) {
+    graphqlSchemaBuilder_.emplace(index_, graphqlConfig_);
+  }
+  const auto& schema = graphqlSchemaBuilder_->getSchema();
+
+  // Check if this is an introspection query and handle it
+  // Introspection queries don't need SPARQL execution
+  nlohmann::json introspectionData = nlohmann::json::object();
+  bool hasIntrospection = false;
+
+  for (const auto& selection : operation->selectionSet) {
+    if (auto* fieldPtr =
+            std::get_if<std::shared_ptr<graphql::Field>>(&selection)) {
+      const auto& field = **fieldPtr;
+
+      if (field.name == "__schema") {
+        // Return the full schema introspection
+        introspectionData["__schema"] = schema.toIntrospectionJSON();
+        hasIntrospection = true;
+      } else if (field.name == "__type") {
+        // Look up a specific type by name
+        const graphql::Argument* nameArg = field.findArgument("name");
+        if (nameArg && !nameArg->value.isNull()) {
+          std::string typeName = nameArg->value.asString();
+          introspectionData["__type"] = schema.typeIntrospection(typeName);
+        } else {
+          introspectionData["__type"] = nullptr;
+        }
+        hasIntrospection = true;
+      }
+    }
+  }
+
+  if (hasIntrospection) {
+    // If query only contains introspection fields, return now
+    bool onlyIntrospection = true;
+    for (const auto& selection : operation->selectionSet) {
+      if (auto* fieldPtr =
+              std::get_if<std::shared_ptr<graphql::Field>>(&selection)) {
+        const auto& field = **fieldPtr;
+        if (field.name != "__schema" && field.name != "__type" &&
+            field.name != "__typename") {
+          onlyIntrospection = false;
+          break;
+        }
+      }
+    }
+
+    if (onlyIntrospection) {
+      nlohmann::json response;
+      response["data"] = introspectionData;
+      response["extensions"]["timing"]["total"] =
+          std::to_string(requestTimer.msecs().count()) + "ms";
+      co_return co_await send(createJsonResponse(response, request));
+    }
+    // Otherwise, continue with regular query execution and merge results later
+  }
+
+  // Handle mutations differently from queries
+  if (operation->type == graphql::OperationType::Mutation) {
+    // Mutations require authentication (same as SPARQL UPDATE)
+    auto accessToken = graphql::GraphQLProtocol::extractAccessToken(request);
+    if (!checkAccessToken(accessToken)) {
+      co_return co_await send(ad_utility::httpUtils::createForbiddenResponse(
+          "GraphQL mutations require a valid access token (same as SPARQL UPDATE). "
+          "Provide via 'Authorization: Bearer <token>' header or "
+          "'?access-token=<token>' URL parameter.",
+          request));
+    }
+
+    // Mutations require special handling
+    // Currently, SPARQL Update support in QLever may be limited
+    // For now, we translate and log the mutation but don't execute it
+
+    // Build mutation schema if not already built
+    graphql::MutationSchemaBuilder mutationBuilder;
+    auto schemaForMutation = schema;  // Copy schema
+    mutationBuilder.buildMutationSchema(schemaForMutation);
+
+    // Create mutation translator
+    graphql::GraphQLMutationTranslator mutationTranslator(schemaForMutation);
+
+    // Translate the mutation
+    auto mutationResult = mutationTranslator.translate(document, opName, graphqlOp.variables);
+
+    if (std::holds_alternative<std::vector<graphql::GraphQLError>>(mutationResult)) {
+      const auto& errors =
+          std::get<std::vector<graphql::GraphQLError>>(mutationResult);
+      nlohmann::json errorResponse;
+      errorResponse["errors"] = nlohmann::json::array();
+      for (const auto& error : errors) {
+        errorResponse["errors"].push_back(error.toJSON());
+      }
+      co_return co_await send(
+          createJsonResponse(errorResponse, request,
+                             boost::beast::http::status::bad_request));
+    }
+
+    auto translatedMutation =
+        std::move(std::get<graphql::MutationTranslationResult>(mutationResult));
+
+    // Log the generated SPARQL Update statements for debugging
+    AD_LOG_INFO << "GraphQL mutation translated. Entity IRI: "
+                << translatedMutation.entityIri << std::endl;
+    for (const auto& stmt : translatedMutation.statements) {
+      std::visit(
+          [](const auto& s) {
+            AD_LOG_DEBUG << "Generated SPARQL Update: " << s.toSparql()
+                         << std::endl;
+          },
+          stmt);
+    }
+
+    // For now, return a placeholder response indicating mutation support is limited
+    // Full SPARQL Update execution would require QLever's update infrastructure
+    nlohmann::json response;
+    response["data"] = nlohmann::json::object();
+
+    // Return the entity IRI that would be created/modified
+    if (!translatedMutation.entityIri.empty()) {
+      nlohmann::json entityData;
+      entityData["id"] = translatedMutation.entityIri;
+      entityData["__typename"] = translatedMutation.entityTypeName;
+
+      // For batch operations, return array of IRIs
+      if (!translatedMutation.batchEntityIris.empty()) {
+        nlohmann::json entities = nlohmann::json::array();
+        for (const auto& iri : translatedMutation.batchEntityIris) {
+          nlohmann::json entity;
+          entity["id"] = iri;
+          entity["__typename"] = translatedMutation.entityTypeName;
+          entities.push_back(entity);
+        }
+        response["data"][operation->selectionSet.empty() ? "result" :
+            (std::holds_alternative<std::shared_ptr<graphql::Field>>(operation->selectionSet[0]) ?
+             std::get<std::shared_ptr<graphql::Field>>(operation->selectionSet[0])->responseKey() :
+             "result")] = entities;
+      } else {
+        response["data"][operation->selectionSet.empty() ? "result" :
+            (std::holds_alternative<std::shared_ptr<graphql::Field>>(operation->selectionSet[0]) ?
+             std::get<std::shared_ptr<graphql::Field>>(operation->selectionSet[0])->responseKey() :
+             "result")] = entityData;
+      }
+    }
+
+    response["extensions"]["timing"]["total"] =
+        std::to_string(requestTimer.msecs().count()) + "ms";
+    response["extensions"]["graphql"]["operationType"] = "mutation";
+    if (operation->name) {
+      response["extensions"]["graphql"]["operationName"] = *operation->name;
+    }
+    response["extensions"]["mutation"]["status"] = "translated";
+    response["extensions"]["mutation"]["note"] =
+        "SPARQL Update execution requires additional QLever infrastructure. "
+        "The mutation has been translated but not executed.";
+    response["extensions"]["mutation"]["statementCount"] =
+        translatedMutation.statements.size();
+
+    co_return co_await send(createJsonResponse(response, request));
+  }
+
+  // Translate GraphQL to SPARQL
+  graphql::GraphQLToSparql translator(schema);
+  auto translateResult = translator.translate(
+      document, opName, graphqlOp.variables);
+
+  if (std::holds_alternative<std::vector<graphql::GraphQLError>>(
+          translateResult)) {
+    const auto& errors =
+        std::get<std::vector<graphql::GraphQLError>>(translateResult);
+    nlohmann::json errorResponse;
+    errorResponse["errors"] = nlohmann::json::array();
+    for (const auto& error : errors) {
+      errorResponse["errors"].push_back(error.toJSON());
+    }
+    co_return co_await send(
+        createJsonResponse(errorResponse, request,
+                           boost::beast::http::status::bad_request));
+  }
+
+  auto translationResult =
+      std::move(std::get<graphql::TranslationResult>(translateResult));
+
+  // Log the generated SPARQL for debugging
+  AD_LOG_DEBUG << "Generated SPARQL: "
+               << translationResult.parsedQuery._originalString << std::endl;
+
+  // Execute the SPARQL query using QLever's infrastructure
+  // Use optional to store error response if execution fails
+  std::optional<nlohmann::json> errorResponse;
+
+  try {
+    // Create a cancellation handle for this request
+    auto cancellationHandle =
+        std::make_shared<ad_utility::CancellationHandle<>>();
+
+    // Create query execution context using the server's allocator
+    QueryExecutionContext qec(index_, &cache_, allocator_,
+                              sortPerformanceEstimator_, &namedResultCache_,
+                              &materializedViewsManager_);
+
+    // Plan and execute the query
+    QueryPlanner qp(&qec, cancellationHandle);
+    auto executionTree =
+        qp.createExecutionTree(translationResult.parsedQuery);
+
+    // Get the variable to column mapping from the execution tree
+    // Convert from VariableToColumnMap to our simpler format
+    const auto& varToCol = executionTree.getVariableColumns();
+    for (const auto& [var, colInfo] : varToCol) {
+      translationResult.variableToColumn[var.name()] =
+          graphql::ColumnInfo{colInfo.columnIndex_};
+    }
+
+    // Execute and get results
+    auto result = executionTree.getResult();
+
+    if (!result) {
+      nlohmann::json errResp;
+      errResp["data"] = nullptr;
+      errResp["errors"] = nlohmann::json::array();
+      nlohmann::json error;
+      error["message"] = "Query execution returned no result";
+      errResp["errors"].push_back(error);
+      co_return co_await send(createJsonResponse(errResp, request));
+    }
+
+    // Format the results as nested GraphQL JSON
+    nlohmann::json response = graphql::GraphQLResultFormatter::format(
+        *result, translationResult, *operation, index_);
+
+    // Add timing and metadata extensions
+    response["extensions"]["timing"]["total"] =
+        std::to_string(requestTimer.msecs().count()) + "ms";
+    response["extensions"]["graphql"]["operationType"] =
+        operation->type == graphql::OperationType::Query
+            ? "query"
+            : (operation->type == graphql::OperationType::Mutation
+                   ? "mutation"
+                   : "subscription");
+    if (operation->name) {
+      response["extensions"]["graphql"]["operationName"] = *operation->name;
+    }
+    response["extensions"]["graphql"]["resultRowCount"] =
+        result->idTable().numRows();
+
+    co_return co_await send(createJsonResponse(response, request));
+
+  } catch (const std::exception& e) {
+    // Handle query execution errors - prepare response but don't co_await here
+    AD_LOG_ERROR << "GraphQL query execution failed: " << e.what()
+                 << std::endl;
+    errorResponse = nlohmann::json{};
+    (*errorResponse)["data"] = nullptr;
+    (*errorResponse)["errors"] = nlohmann::json::array();
+    nlohmann::json error;
+    // Security: Sanitize error messages to avoid leaking internal details
+    std::string errorMsg = e.what();
+    // Only include safe error messages that don't leak paths or internal state
+    if (errorMsg.find("No such file") != std::string::npos ||
+        errorMsg.find("Permission denied") != std::string::npos ||
+        errorMsg.find("/") != std::string::npos) {
+      error["message"] = "Query execution failed due to an internal error";
+    } else {
+      // Limit error message length to prevent information disclosure
+      constexpr size_t MAX_ERROR_LENGTH = 500;
+      if (errorMsg.length() > MAX_ERROR_LENGTH) {
+        errorMsg = errorMsg.substr(0, MAX_ERROR_LENGTH) + "...";
+      }
+      error["message"] = std::string("Query execution failed: ") + errorMsg;
+    }
+    error["extensions"]["code"] = "EXECUTION_ERROR";
+    (*errorResponse)["errors"].push_back(error);
+    (*errorResponse)["extensions"]["timing"]["total"] =
+        std::to_string(requestTimer.msecs().count()) + "ms";
+  }
+
+  // Send error response outside the catch block
+  if (errorResponse.has_value()) {
+    co_return co_await send(
+        createJsonResponse(*errorResponse, request,
+                           boost::beast::http::status::internal_server_error));
+  }
+}
+
+// ____________________________________________________________________________
+// Helper to convert SchemaBuilderConfig to JSON
+static nlohmann::json configToJson(const graphql::SchemaBuilderConfig& config) {
+  nlohmann::json j;
+  j["minInstanceCount"] = config.minInstanceCount;
+  j["maxTypes"] = config.maxTypes;
+  j["minPropertyUses"] = config.minPropertyUses;
+  j["maxPropertiesPerType"] = config.maxPropertiesPerType;
+  j["useLabelsAsFieldNames"] = config.useLabelsAsFieldNames;
+  j["preferredLanguage"] = config.preferredLanguage;
+  j["discoverRelationships"] = config.discoverRelationships;
+  j["useOwlInference"] = config.useOwlInference;
+  j["autoGenerateOwlViews"] = config.autoGenerateOwlViews;
+  j["generateInterfaces"] = config.generateInterfaces;
+  j["inheritProperties"] = config.inheritProperties;
+
+  // Convert prefixes map
+  nlohmann::json prefixes = nlohmann::json::object();
+  for (const auto& [iri, prefix] : config.prefixes) {
+    prefixes[iri] = prefix;
+  }
+  j["prefixes"] = prefixes;
+
+  return j;
+}
+
+// Helper to update SchemaBuilderConfig from JSON
+static void configFromJson(const nlohmann::json& j,
+                           graphql::SchemaBuilderConfig& config) {
+  if (j.contains("minInstanceCount")) {
+    config.minInstanceCount = j["minInstanceCount"].get<size_t>();
+  }
+  if (j.contains("maxTypes")) {
+    config.maxTypes = j["maxTypes"].get<size_t>();
+  }
+  if (j.contains("minPropertyUses")) {
+    config.minPropertyUses = j["minPropertyUses"].get<size_t>();
+  }
+  if (j.contains("maxPropertiesPerType")) {
+    config.maxPropertiesPerType = j["maxPropertiesPerType"].get<size_t>();
+  }
+  if (j.contains("useLabelsAsFieldNames")) {
+    config.useLabelsAsFieldNames = j["useLabelsAsFieldNames"].get<bool>();
+  }
+  if (j.contains("preferredLanguage")) {
+    config.preferredLanguage = j["preferredLanguage"].get<std::string>();
+  }
+  if (j.contains("discoverRelationships")) {
+    config.discoverRelationships = j["discoverRelationships"].get<bool>();
+  }
+  if (j.contains("useOwlInference")) {
+    config.useOwlInference = j["useOwlInference"].get<bool>();
+  }
+  if (j.contains("autoGenerateOwlViews")) {
+    config.autoGenerateOwlViews = j["autoGenerateOwlViews"].get<bool>();
+  }
+  if (j.contains("generateInterfaces")) {
+    config.generateInterfaces = j["generateInterfaces"].get<bool>();
+  }
+  if (j.contains("inheritProperties")) {
+    config.inheritProperties = j["inheritProperties"].get<bool>();
+  }
+  if (j.contains("prefixes") && j["prefixes"].is_object()) {
+    config.prefixes.clear();
+    for (const auto& [iri, prefix] : j["prefixes"].items()) {
+      config.prefixes[iri] = prefix.get<std::string>();
+    }
+  }
+}
+
+// ____________________________________________________________________________
+template <typename RequestT, typename ResponseT>
+requires ad_utility::httpUtils::HttpRequest<RequestT>
+Awaitable<void> Server::processGraphQLConfigRequest(const RequestT& request,
+                                                    ResponseT&& send) {
+  using ad_utility::httpUtils::createJsonResponse;
+  using ad_utility::httpUtils::createForbiddenResponse;
+  namespace http = boost::beast::http;
+
+  // Extract and validate access token - config endpoint requires auth for all operations
+  auto accessToken = graphql::GraphQLProtocol::extractAccessToken(request);
+  if (!checkAccessToken(accessToken)) {
+    co_return co_await send(createForbiddenResponse(
+        "GraphQL configuration endpoint requires a valid access token. "
+        "Provide via 'Authorization: Bearer <token>' header or "
+        "'?access-token=<token>' URL parameter.",
+        request));
+  }
+
+  // GET request: return current configuration
+  if (request.method() == http::verb::get) {
+    nlohmann::json response;
+    response["config"] = configToJson(graphqlConfig_);
+    response["cached"] = graphqlSchemaBuilder_.has_value();
+
+    co_return co_await send(createJsonResponse(
+        response, request, http::status::ok));
+  }
+
+  // POST request: update configuration
+  if (request.method() == http::verb::post) {
+    nlohmann::json responseJson;
+    http::status responseStatus = http::status::ok;
+
+    try {
+      nlohmann::json body = nlohmann::json::parse(request.body());
+
+      // Update the configuration
+      graphql::SchemaBuilderConfig newConfig = graphqlConfig_;
+      configFromJson(body, newConfig);
+
+      // Apply the new configuration (this clears the cache)
+      setGraphQLConfig(newConfig);
+
+      // Return the updated configuration
+      responseJson["config"] = configToJson(graphqlConfig_);
+      responseJson["message"] = "Configuration updated successfully";
+      responseJson["cached"] = false;  // Cache was cleared
+    } catch (const nlohmann::json::parse_error& e) {
+      responseJson["error"] = "Invalid JSON";
+      responseJson["message"] = e.what();
+      responseStatus = http::status::bad_request;
+    } catch (const std::exception& e) {
+      responseJson["error"] = "Configuration error";
+      responseJson["message"] = e.what();
+      responseStatus = http::status::bad_request;
+    }
+
+    co_return co_await send(createJsonResponse(
+        responseJson, request, responseStatus));
+  }
+
+  // Other methods not allowed
+  nlohmann::json error;
+  error["error"] = "Method not allowed";
+  error["message"] = "Use GET to read config, POST to update config";
+  co_return co_await send(createJsonResponse(
+      error, request, http::status::method_not_allowed));
+}
+
+// Explicit template instantiation for GraphQL request processing
+template Awaitable<void> Server::processGraphQLRequest(
+    const SimpleRequest&,
+    std::function<Awaitable<void>(NonStreamedResponse)>&&,
+    const ad_utility::Timer&);
+
+// Explicit template instantiation for GraphQL config request processing
+template Awaitable<void> Server::processGraphQLConfigRequest(
+    const SimpleRequest&,
+    std::function<Awaitable<void>(NonStreamedResponse)>&&);
+#endif  // QLEVER_GRAPHQL_SUPPORT

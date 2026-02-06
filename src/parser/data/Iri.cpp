@@ -6,8 +6,6 @@
 
 #include <ctre-unicode.hpp>
 
-#include "util/Exception.h"
-
 namespace {
 // CTRE regex pattern for C++17 compatibility
 constexpr ctll::fixed_string iriValidationRegex =

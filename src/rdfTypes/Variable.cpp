@@ -8,7 +8,7 @@
 
 #include "global/Constants.h"
 #include "parser/ParserAndVisitorBase.h"
-#include "util/Exception.h"
+#include "parser/data/ConstructQueryExportContext.h"
 
 // ___________________________________________________________________________
 Variable::Variable(std::string name, bool checkName) : _name{std::move(name)} {
@@ -19,6 +19,13 @@ Variable::Variable(std::string name, bool checkName) : _name{std::move(name)} {
   }
   // normalize notation for consistency
   _name[0] = '?';
+}
+
+// ___________________________________________________________________________
+[[nodiscard]] std::optional<std::string> Variable::evaluate(
+    const ConstructQueryExportContext& context,
+    [[maybe_unused]] PositionInTriple positionInTriple) const {
+  return decoupledEvaluateFuncPtr()(*this, context, positionInTriple);
 }
 
 // _____________________________________________________________________________
@@ -124,4 +131,17 @@ bool Variable::isValidVariableName(std::string_view var) {
   } catch (...) {
     return false;
   }
+}
+
+// Implement the indirection for the evaluation of variables (see the header for
+// details).
+Variable::EvaluateFuncPtr& Variable::decoupledEvaluateFuncPtr() {
+  static constexpr auto dummy =
+      [](const Variable&, const ConstructQueryExportContext&,
+         PositionInTriple) -> std::optional<std::string> {
+    throw std::runtime_error(
+        "Variable::decoupledEvaluateFuncPtr() not yet set");
+  };
+  static EvaluateFuncPtr ptr = dummy;
+  return ptr;
 }

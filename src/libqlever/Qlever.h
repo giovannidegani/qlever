@@ -251,9 +251,6 @@ class Qlever {
   // to load the view.
   void loadMaterializedView(std::string name) const;
 
-  // Check if a materialized view with the given name is currently loaded.
-  bool isMaterializedViewLoaded(const std::string& name) const;
-
   // Write the contents of the `NamedResultCache` to disk.
   template <typename Serializer>
   void writeNamedResultCacheToSerializer(Serializer& serializer) const {

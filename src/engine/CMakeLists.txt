@@ -1,4 +1,10 @@
 add_subdirectory(sparqlExpressions)
+
+# GraphQL support (optional, enabled by default)
+if (GRAPHQL_SUPPORT)
+    add_subdirectory(graphql)
+endif()
+
 add_library(SortPerformanceEstimator SortPerformanceEstimator.cpp)
 qlever_target_link_libraries(SortPerformanceEstimator parser)
 add_library(engine
@@ -18,7 +24,7 @@ add_library(engine
         QueryExecutionContext.cpp ExistsJoin.cpp SparqlProtocol.cpp ParsedRequestBuilder.cpp
         NeutralOptional.cpp Load.cpp StripColumns.cpp NamedResultCache.cpp
         ExplicitIdTableOperation.cpp StringMapping.cpp MaterializedViews.cpp
-        PermutationSelector.cpp ConstructQueryEvaluator.cpp ConstructTripleGenerator.cpp)
+        PermutationSelector.cpp)
 
 qlever_target_link_libraries(engine util index parser global sparqlExpressions SortPerformanceEstimator Boost::iostreams s2 spatialjoin-dev pb_util pb_util_geo)
 
@@ -32,3 +38,8 @@ endif()
 
 add_library(server Server.cpp)
 qlever_target_link_libraries(server engine util index parser global http SortPerformanceEstimator)
+
+# Link GraphQL engine to server if enabled
+if (GRAPHQL_SUPPORT)
+    target_link_libraries(server graphqlEngine)
+endif()

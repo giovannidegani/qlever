@@ -377,12 +377,41 @@ FetchContent_Declare(
 )
 
 ################################
+# CPPGRAPHQLGEN (GraphQL Parser)
+# MIT License - for native GraphQL support
+################################
+option(GRAPHQL_SUPPORT "Enable GraphQL query support" ON)
+if (GRAPHQL_SUPPORT)
+    # We only need the parsing library, not the code generators
+    set(GRAPHQL_BUILD_SCHEMAGEN OFF CACHE BOOL "Disable schema generator")
+    set(GRAPHQL_BUILD_CLIENTGEN OFF CACHE BOOL "Disable client generator")
+    set(GRAPHQL_BUILD_TESTS OFF CACHE BOOL "Disable cppgraphqlgen tests")
+    set(GRAPHQL_UPDATE_VERSION OFF CACHE BOOL "Don't update version")
+    set(GRAPHQL_USE_RAPIDJSON OFF CACHE BOOL "Don't require RapidJSON")
+    FetchContent_Declare(
+            cppgraphqlgen
+            GIT_REPOSITORY https://github.com/microsoft/cppgraphqlgen.git
+            GIT_TAG v4.5.6  # Latest stable release
+            EXCLUDE_FROM_ALL
+    )
+    add_compile_definitions(QLEVER_GRAPHQL_SUPPORT)
+endif ()
+
+################################
 # Apply FetchContent
 ################################
-FetchContent_MakeAvailable(googletest ctre abseil re2 fsst s2 nlohmann-json antlr range-v3 spatialjoin)
+if (GRAPHQL_SUPPORT)
+    FetchContent_MakeAvailable(googletest ctre abseil re2 fsst s2 nlohmann-json antlr range-v3 spatialjoin cppgraphqlgen)
+else ()
+    FetchContent_MakeAvailable(googletest ctre abseil re2 fsst s2 nlohmann-json antlr range-v3 spatialjoin)
+endif ()
 # Disable some warnings in RE2 and GTEST
 target_compile_options(s2 PRIVATE -Wno-sign-compare -Wno-unused-parameter -Wno-class-memaccess -Wno-comment -Wno-redundant-move -Wno-unknown-warning-option -Wno-maybe-uninitialized -Wno-class-memaccess -Wno-unused-but-set-variable -Wno-unused-function)
 target_compile_options(re2 PRIVATE -Wno-unused-parameter)
+# Disable deprecated literal operator warning in cppgraphqlgen
+if (GRAPHQL_SUPPORT)
+    target_compile_options(graphqlpeg PRIVATE -Wno-deprecated-literal-operator -Wno-error=deprecated-literal-operator)
+endif ()
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(gtest PRIVATE -Wno-maybe-uninitialized)
 endif ()
@@ -478,17 +507,13 @@ add_subdirectory(test)
 add_library(compilationInfo ${CMAKE_CURRENT_BINARY_DIR}/CompilationInfo.cpp)
 qlever_target_link_libraries(compilationInfo)
 
-OPTION(_EMSCRIPTEN_NO_INDEXBUILDER_AND_SERVER "Don't build some targets when compiling with Emscripten." OFF)
+add_executable(qlever-index src/index/IndexBuilderMain.cpp)
+qlever_target_link_libraries(qlever-index qlever index ${CMAKE_THREAD_LIBS_INIT} Boost::program_options compilationInfo global)
 
-if (NOT _EMSCRIPTEN_NO_INDEXBUILDER_AND_SERVER)
-    add_executable(qlever-index src/index/IndexBuilderMain.cpp)
-    qlever_target_link_libraries(qlever-index qlever index ${CMAKE_THREAD_LIBS_INIT} Boost::program_options compilationInfo global)
-
-    add_executable(qlever-server src/ServerMain.cpp)
-    qlever_target_link_libraries(qlever-server engine server ${CMAKE_THREAD_LIBS_INIT} Boost::program_options compilationInfo global)
-    if (USE_PRECOMPILED_HEADERS)
-        target_precompile_headers(qlever-server REUSE_FROM engine)
-    endif()
+add_executable(qlever-server src/ServerMain.cpp)
+qlever_target_link_libraries(qlever-server engine server ${CMAKE_THREAD_LIBS_INIT} Boost::program_options compilationInfo global)
+if (USE_PRECOMPILED_HEADERS)
+    target_precompile_headers(qlever-server REUSE_FROM engine)
 endif()
 
 add_executable(LibQLeverExample src/libqlever/LibQLeverExample.cpp)
@@ -500,13 +525,11 @@ qlever_target_link_libraries(VocabularyMergerMain index parser ${CMAKE_THREAD_LI
 add_executable(PrintIndexVersionMain src/PrintIndexVersionMain.cpp)
 qlever_target_link_libraries(PrintIndexVersionMain util)
 
-if (NOT _EMSCRIPTEN_NO_INDEXBUILDER_AND_SERVER)
-    install(TARGETS
-        qlever-index
-        qlever-server
-        RUNTIME DESTINATION bin
-    )
-endif()
+install(TARGETS
+    qlever-index
+    qlever-server
+    RUNTIME DESTINATION bin
+)
 
 ###############################################################
 # CPack packaging

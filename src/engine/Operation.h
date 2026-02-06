@@ -150,12 +150,16 @@ class Operation {
   }
 
   // Get an updated `QueryExecutionTree` that applies as many of the given
-  // `prefilters` as possible. If none of them applies, return `std::nullopt`,
-  // signaling that the `QueryExecutionTree` will not be changed. This is the
-  // default implementation.
+  // `PrefilterExpression`s over `IndexScan` as possible. Returns `nullopt`
+  // if no `PrefilterExpression` is applicable and thus the `QueryExecutionTree`
+  // is not changed.
+  // Note: The default implementation always returns `nullopt` while this
+  // function is currently only overridden for `IndexScan`. In the future also
+  // other operations could pass on the `PrefilterExpressions` to the
+  // `IndexScan` in their subtree.
   virtual std::optional<std::shared_ptr<QueryExecutionTree>>
-  getUpdatedQueryExecutionTreeWithPrefilterApplied(
-      [[maybe_unused]] const std::vector<PrefilterVariablePair>& prefilters)
+  setPrefilterGetUpdatedQueryExecutionTree(
+      [[maybe_unused]] const std::vector<PrefilterVariablePair>& prefilterPairs)
       const {
     return std::nullopt;
   };

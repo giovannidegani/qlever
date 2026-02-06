@@ -330,7 +330,7 @@ class CompressedRelationWriter {
       std::function<void(ql::span<const CompressedRelationMetadata>)>;
 
   struct WriterAndCallback {
-    std::unique_ptr<CompressedRelationWriter> writer_;
+    CompressedRelationWriter& writer_;
     MetadataCallback callback_;
   };
 

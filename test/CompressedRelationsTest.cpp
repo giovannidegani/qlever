@@ -168,17 +168,16 @@ compressedRelationTestWriteCompressedRelations(
   };
 
   // First create the on-disk permutation.
-  auto writer = std::make_unique<CompressedRelationWriter>(
-      numColumns, ad_utility::File{filename, "w"}, blocksize);
+  CompressedRelationWriter writer{numColumns, ad_utility::File{filename, "w"},
+                                  blocksize};
   std::vector<CompressedRelationMetadata> metaData;
   CompressedRelationWriter::WriterAndCallback wc1{
-      std::move(writer),
-      [&](ql::span<const CompressedRelationMetadata> metadata) {
+      writer, [&](ql::span<const CompressedRelationMetadata> metadata) {
         metaData.insert(metaData.end(), metadata.begin(), metadata.end());
       }};
 
   auto res = CompressedRelationWriter::createPermutation(
-      std::move(wc1), ad_utility::InputRangeTypeErased{generator(5)},
+      wc1, ad_utility::InputRangeTypeErased{generator(5)},
       qlever::KeyOrder{0, 1, 2, 3}, {});
   auto& blocks = res.blockMetadata_;
   // Test the serialization of the blocks and the metaData.
