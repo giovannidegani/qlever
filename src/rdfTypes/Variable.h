@@ -67,7 +67,7 @@ class Variable {
   // `?ql_someTextVar_score_var_someEntityVar`.
   // Converts `?someTextVar` and `someFixedEntity` into
   // `?ql_someTextVar_fixedEntity_someFixedEntity`.
-  // Note that if the the fixed entity contains non ascii characters they are
+  // Note that if the fixed entity contains non ascii characters they are
   // converted to numbers and escaped.
   Variable getEntityScoreVariable(
       const std::variant<Variable, std::string>& varOrEntity) const;

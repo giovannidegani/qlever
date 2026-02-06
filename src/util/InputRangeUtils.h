@@ -55,13 +55,13 @@ CPP_class_template(typename View, typename F,
   // The input view, the function, and the current iterator into the `view_`.
   // The iterator is `nullopt` before the first call to `get`.
   View view_;
-  ::ranges::semiregular_box_t<F> transfomation_;
+  ::ranges::semiregular_box_t<F> transformation_;
   std::optional<ql::ranges::iterator_t<View>> it_;
 
  public:
   // Constructor.
   explicit CachingTransformInputRange(View view, F transformation = {})
-      : view_{std::move(view)}, transfomation_(std::move(transformation)) {
+      : view_{std::move(view)}, transformation_(std::move(transformation)) {
     if constexpr (!std::is_same_v<Details, NoDetails>) {
       static_cast<Base*>(this)->setDetailsPointer(&view_.base().details());
     }
@@ -82,7 +82,7 @@ CPP_class_template(typename View, typename F,
     if (*it_ == view_.end()) {
       return std::nullopt;
     }
-    return std::invoke(transfomation_, *it_.value());
+    return std::invoke(transformation_, *it_.value());
   }
 
   // Get access to the underlying view.

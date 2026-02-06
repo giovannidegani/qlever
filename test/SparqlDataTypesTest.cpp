@@ -62,7 +62,7 @@ TEST(SparqlDataTypesTest, BlankNodeEvaluatesCorrectlyBasedOnContext) {
   EXPECT_THAT(blankNodeA.evaluate(context0, OBJECT), Optional("_:u0_a"s));
   EXPECT_THAT(blankNodeB.evaluate(context0, SUBJECT), Optional("_:g0_b"s));
   EXPECT_THAT(blankNodeB.evaluate(context0, PREDICATE), Optional("_:g0_b"s));
-  EXPECT_THAT(blankNodeB.evaluate(context0, SUBJECT), Optional("_:g0_b"s));
+  EXPECT_THAT(blankNodeB.evaluate(context0, OBJECT), Optional("_:g0_b"s));
 
   ConstructQueryExportContext context10 = wrapper.createContextForRow(10);
 
