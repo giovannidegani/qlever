@@ -103,6 +103,8 @@ class PatternCreator {
   // because more triples with the same subject might be pushed.
   Pattern currentPattern_;
 
+  ad_utility::serialization::FileWriteSerializer patternSerializer_;
+
   // Store the additional triples that are created by the pattern mechanism for
   // the `has-pattern` and `has-predicate` predicates.
   struct TripleAndIsInternal {
@@ -128,16 +130,17 @@ class PatternCreator {
 
  public:
   // The patterns will be written to files starting with `basename`.
-  explicit PatternCreator(std::string basename, Id idOfHasPattern,
+  explicit PatternCreator(const std::string& basename, Id idOfHasPattern,
                           ad_utility::MemorySize memoryLimit)
-      : filename_{std::move(basename)},
+      : filename_{basename},
+        patternSerializer_{{basename}},
         tripleBuffer_(100'000, basename + ".tripleBufferForPatterns.dat"),
         tripleSorter_{
             std::make_unique<PSOSorter>(
-                filename_ + ".additionalTriples.pso.dat", memoryLimit / 2,
+                basename + ".additionalTriples.pso.dat", memoryLimit / 2,
                 ad_utility::makeUnlimitedAllocator<Id>()),
             std::make_unique<OSPSorter4Cols>(
-                filename_ + ".second-sorter.dat", memoryLimit / 2,
+                basename + ".second-sorter.dat", memoryLimit / 2,
                 ad_utility::makeUnlimitedAllocator<Id>())},
         idOfHasPattern_{idOfHasPattern} {
     AD_LOG_DEBUG << "Computing predicate patterns ..." << std::endl;
@@ -171,13 +174,6 @@ class PatternCreator {
                                    double& avgNumPredicatesPerSubject,
                                    uint64_t& numDistinctSubjectPredicatePairs,
                                    CompactVectorOfStrings<Id>& patterns);
-
-  // Write the given patterns and their statistics to files with the given
-  // `filename`.
-  static void writePatternsToFile(
-      const std::string& filename,
-      const CompactVectorOfStrings<Pattern::value_type>& patterns,
-      const PatternStatistics& patternStatistics);
 
   // Move out the sorted triples after finishing creating the patterns.
   TripleSorter&& getTripleSorter() && {

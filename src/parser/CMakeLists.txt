@@ -2,6 +2,11 @@
 add_subdirectory(sparqlParser)
 add_subdirectory(data)
 
+# GraphQL support (optional, enabled by default)
+if (GRAPHQL_SUPPORT)
+    add_subdirectory(graphql)
+endif ()
+
 add_library(parser
         sparqlParser/SparqlQleverVisitor.cpp
         SparqlParser.cpp
@@ -32,3 +37,9 @@ add_library(parser
         MaterializedViewQuery.cpp
 )
 qlever_target_link_libraries(parser sparqlParser parserData sparqlExpressions rdfEscaping global re2::re2 util engine index rdfTypes)
+
+# Link GraphQL parser if enabled
+if (GRAPHQL_SUPPORT)
+    target_link_libraries(parser graphqlParser)
+    target_compile_definitions(parser PUBLIC QLEVER_GRAPHQL_SUPPORT)
+endif ()

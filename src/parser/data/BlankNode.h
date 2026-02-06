@@ -8,7 +8,7 @@
 #include <string>
 
 #include "backports/three_way_comparison.h"
-#include "util/Exception.h"
+#include "parser/data/ConstructQueryExportContext.h"
 
 class BlankNode {
   bool _generated;
@@ -19,14 +19,19 @@ class BlankNode {
 
   // ___________________________________________________________________________
   // Used for testing
-  bool isGenerated() const { return _generated; }
+  [[nodiscard]] bool isGenerated() const { return _generated; }
 
   // ___________________________________________________________________________
   // Used for testing
-  const std::string& label() const { return _label; }
+  [[nodiscard]] const std::string& label() const { return _label; }
 
   // ___________________________________________________________________________
-  std::string toSparql() const;
+  [[nodiscard]] std::optional<std::string> evaluate(
+      const ConstructQueryExportContext& context,
+      [[maybe_unused]] PositionInTriple positionInTriple) const;
+
+  // ___________________________________________________________________________
+  [[nodiscard]] std::string toSparql() const;
 
   QL_DEFINE_DEFAULTED_EQUALITY_OPERATOR_LOCAL(BlankNode, _generated, _label)
 };

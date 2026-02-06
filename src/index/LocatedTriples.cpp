@@ -52,23 +52,20 @@ std::vector<LocatedTriple> LocatedTriple::locateTriplesInPermutation(
 }
 
 // ____________________________________________________________________________
-boost::optional<const LocatedTriples&>
-LocatedTriplesPerBlock::getUpdatesIfPresent(size_t blockIndex) const {
-  auto it = map_.find(blockIndex);
-  if (it == map_.end()) {
-    return boost::optional<const LocatedTriples&>{};
-  }
-  return boost::optional<const LocatedTriples&>{it->second};
+bool LocatedTriplesPerBlock::hasUpdates(size_t blockIndex) const {
+  return map_.contains(blockIndex);
 }
 
 // ____________________________________________________________________________
 NumAddedAndDeleted LocatedTriplesPerBlock::numTriples(size_t blockIndex) const {
-  if (auto blockUpdateTriples = getUpdatesIfPresent(blockIndex)) {
+  if (!hasUpdates(blockIndex)) {
+    return {0, 0};
+  } else {
+    const auto& blockUpdateTriples = map_.at(blockIndex);
     // Simply return the number of located triples twice. See the comment in the
     // header file for the reasons and potential improvements.
-    return {blockUpdateTriples->size(), blockUpdateTriples->size()};
+    return {blockUpdateTriples.size(), blockUpdateTriples.size()};
   }
-  return {0, 0};
 }
 
 namespace {
@@ -327,22 +324,24 @@ void LocatedTriplesPerBlock::updateAugmentedMetadata() {
     augmentedMetadata_ = *originalMetadata_.value();
   }
   for (auto& blockMetadata : augmentedMetadata_.value()) {
-    if (auto blockUpdates = getUpdatesIfPresent(blockIndex)) {
+    if (hasUpdates(blockIndex)) {
+      const auto& blockUpdates = map_.at(blockIndex);
       blockMetadata.firstTriple_ =
           std::min(blockMetadata.firstTriple_,
-                   blockUpdates->begin()->triple_.toPermutedTriple());
+                   blockUpdates.begin()->triple_.toPermutedTriple());
       blockMetadata.lastTriple_ =
           std::max(blockMetadata.lastTriple_,
-                   blockUpdates->rbegin()->triple_.toPermutedTriple());
-      updateGraphMetadata(blockMetadata, *blockUpdates);
+                   blockUpdates.rbegin()->triple_.toPermutedTriple());
+      updateGraphMetadata(blockMetadata, blockUpdates);
     }
     blockIndex++;
   }
   // Also account for the last block that contains the triples that are larger
   // than all the inserted triples.
-  if (auto blockUpdates = getUpdatesIfPresent(blockIndex)) {
-    auto firstTriple = blockUpdates->begin()->triple_.toPermutedTriple();
-    auto lastTriple = blockUpdates->rbegin()->triple_.toPermutedTriple();
+  if (hasUpdates(blockIndex)) {
+    const auto& blockUpdates = map_.at(blockIndex);
+    auto firstTriple = blockUpdates.begin()->triple_.toPermutedTriple();
+    auto lastTriple = blockUpdates.rbegin()->triple_.toPermutedTriple();
 
     // The first `std::nullopt` means that this block contains only
     // `LocatedTriple`s.
@@ -350,7 +349,7 @@ void LocatedTriplesPerBlock::updateAugmentedMetadata() {
         std::nullopt, 0, firstTriple, lastTriple, std::nullopt, true};
     lastBlockN.graphInfo_.emplace();
     CompressedBlockMetadata lastBlock{lastBlockN, blockIndex};
-    updateGraphMetadata(lastBlock, *blockUpdates);
+    updateGraphMetadata(lastBlock, blockUpdates);
     augmentedMetadata_->push_back(lastBlock);
 
     AD_CORRECTNESS_CHECK(

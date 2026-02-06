@@ -8,7 +8,6 @@
 
 #include "engine/ExportQueryExecutionTrees.h"
 #include "engine/IndexScan.h"
-#include "engine/QueryExportTypes.h"
 #include "engine/QueryPlanner.h"
 #include "parser/LiteralOrIri.h"
 #include "parser/NormalizedString.h"
@@ -318,9 +317,12 @@ static const std::string xmlTrailer = "\n</results>\n</sparql>";
 
 // Helper function for easier testing of the `IdTable` generator.
 std::vector<IdTable> convertToVector(
-    ad_utility::InputRangeTypeErased<TableConstRefWithVocab> generator) {
+    ad_utility::InputRangeTypeErased<
+        ExportQueryExecutionTrees::TableConstRefWithVocab>
+        generator) {
   std::vector<IdTable> result;
-  for (const TableConstRefWithVocab& pair : generator) {
+  for (const ExportQueryExecutionTrees::TableConstRefWithVocab& pair :
+       generator) {
     result.push_back(pair.idTable().clone());
   }
   return result;
@@ -333,7 +335,8 @@ auto matchesIdTables(const Tables&... tables) {
 }
 
 std::vector<IdTable> convertToVector(
-    ad_utility::InputRangeTypeErased<TableWithRange> generator) {
+    ad_utility::InputRangeTypeErased<ExportQueryExecutionTrees::TableWithRange>
+        generator) {
   std::vector<IdTable> result;
   for (const auto& [pair, range] : generator) {
     const auto& idTable = pair.idTable();
@@ -1039,7 +1042,6 @@ testIriKg</uri></binding>
   runConstructQueryTestCase(testCaseConstruct);
 }
 
-// ____________________________________________________________________________
 TEST(ExportQueryExecutionTrees, TestWithIriExtendedEscaped) {
   std::string kg =
       "<s> <p>"
@@ -1529,7 +1531,6 @@ TEST(ExportQueryExecutionTrees, CornerCases) {
       ::testing::ContainsRegex("should be unreachable"));
 }
 
-// _____________________________________________________________________________
 // Test the correct exporting of ASK queries.
 TEST(ExportQueryExecutionTrees, AskQuery) {
   auto askResultTrue = [](bool lazy) {
@@ -2247,7 +2248,6 @@ TEST(ExportQueryExecutionTrees, GetLiteralOrIriFromVocabIndexWithEncodedIris) {
   }
 }
 
-// _____________________________________________________________________________
 // Test that a `sparql-results+json` export includes a `meta` field if and
 // only if the respective runtime parameter is enabled.
 TEST(ExportQueryExecutionTrees, SparqlJsonWithMetaField) {
